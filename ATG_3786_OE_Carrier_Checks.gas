@@ -1,0 +1,242 @@
+Program.Sub.ScreenSU.Start
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'Coded by: SMC
+'Project Start Date: 10/8/2011
+'Hooks:
+'  OES0200A-POPULATE-HOOK (000011560)
+'  OES0200A-ORDER-SELECTED-HOOK (000011565)
+'  Pre-Save Hook (000011870)
+'  Post-Save Hook (000011872)
+'  OES0200A-LINES-BTN-HOOK (11810)
+'  OES0200A-PRINT-BTN-HOOK (000011890)
+'Notes:
+'  Quote 2901 for Customer M.A. Ford:
+'
+'  A GAB script will be created that will perform several checks on the data entered prior to saving a new sales order.
+'
+'  This script will be hooked to the pre-save hook (11870) on the Order Entry System screen. When the user attempts to save the GAB script will check the carrier field.
+'  If the value in this field ends with a "C" (for collect), the program will verify that a value has been entered for the carrier account number. If no value is present, an
+'  error message will be displayed and the save will be cancelled. The program will also verify that if the carrier account number is the correct length for the specified carrier.
+'  For UPS, the carrier account number should be 6 digits, FedEx should be 9 digits. If the account number is the wrong length, the save will be cancelled.
+
+F.Intrinsic.Control.SetErrorHandler("Main_Err")
+F.Intrinsic.Control.ClearErrors
+
+'F.Intrinsic.Debug.ShowCallerInfo
+V.Local.sError.Declare(String)
+F.ODBC.Connection!conx.OpenConnection(V.Ambient.PDSN,V.Ambient.PUser,V.Ambient.PPass)
+'F.Intrinsic.Control.If(V.Caller.Hook,=,11560)
+''	F.Intrinsic.Control.CallSub(Populate)
+'F.Intrinsic.Control.ElseIf(V.Caller.Hook,=,11565)
+''	F.Intrinsic.Control.CallSub(Change_order)
+F.Intrinsic.Control.If(V.Caller.Hook,=,11810)
+	'Lines
+	F.Intrinsic.Control.CallSub(Pre-save)
+F.Intrinsic.Control.ElseIf(V.Caller.Hook,=,11870)
+	F.Intrinsic.Control.CallSub(Pre-save)
+F.Intrinsic.Control.ElseIf(V.Caller.Hook,=,11890)
+	'Print
+	F.Intrinsic.Control.CallSub(Pre-save)
+'	F.Intrinsic.Control.If(V.Passed.777777,<>,1)
+'		F.Intrinsic.Control.CallSub(Post-save)
+'	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.ElseIf(V.Caller.Hook,=,11872)
+	F.Intrinsic.Control.CallSub(Post-save)
+F.Intrinsic.Control.EndIf
+F.ODBC.Connection!conx.Close
+F.Intrinsic.Control.End
+
+F.Intrinsic.Control.Label("Main_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: ATG_3786_OE_Carrier_Checks.gas",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+Function.Intrinsic.Control.EndIf
+F.Intrinsic.Control.End
+
+Program.Sub.Main.End
+
+Program.Sub.Populate.Start
+F.Intrinsic.Variable.SetProperty("GAB-LBL-1","PL",525)
+F.Intrinsic.Variable.SetProperty("GAB-LBL-1","PT",472)
+F.Intrinsic.Variable.SetProperty("GAB-LBL-1","PW",50)
+F.Intrinsic.Variable.SetProperty("GAB-LBL-1","PH",11)
+V.Passed.GAB-LBL-1.Set("Collect #")
+F.Intrinsic.Variable.SetProperty("GAB-TEXT-1","PL",525)
+F.Intrinsic.Variable.SetProperty("GAB-TEXT-1","PT",485)
+F.Intrinsic.Variable.SetProperty("GAB-TEXT-1","PW",120)
+F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-LBL-1,"HIDE",0)
+F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-TEXT-1,"HIDE",0)
+F.Intrinsic.UI.ChangeCallerProperty(V.Passed.GAB-TEXT-1,"LOCK",0)
+
+Program.Sub.Populate.End
+
+Program.Sub.Pre-Save.Start
+V.Local.sCarrier.Declare(String)
+V.Local.sAccount.Declare(String)
+V.Local.iPos.Declare(Long)
+V.Local.sQuery.Declare(String)
+V.Local.bFedex.Declare(Boolean)
+V.Local.sFile.Declare(String)
+V.Local.bExists.Declare(Boolean)
+V.Local.bFound.Declare(Boolean)
+V.Local.sText.Declare(String)
+V.Local.iC.Declare(Long)
+V.Local.sOverideFile.Declare(String)
+
+f.Intrinsic.Control.If(v.Caller.TempDir.Right1,=,"\")
+	F.Intrinsic.String.Concat(V.Caller.TempDir,"ATGCarrierCheck",V.Caller.Terminal,".txt",V.Local.sOverideFile)
+F.Intrinsic.Control.Else
+	F.Intrinsic.String.Concat(V.Caller.TempDir,"\ATGCarrierCheck",V.Caller.Terminal,".txt",V.Local.sOverideFile)
+F.Intrinsic.Control.EndIf
+F.Intrinsic.File.Exists(V.Local.sOverideFile,V.Local.bExists)
+F.Intrinsic.Control.If(V.Local.bExists,=,True)
+	F.Intrinsic.File.DeleteFile(V.Local.sOverideFile)
+F.Intrinsic.Control.EndIf
+
+
+V.Local.sCarrier.Set(V.Passed.000094.Trim)
+V.Local.sCarrier.Set(V.Local.sCarrier.UCase)
+V.Local.sAccount.Set(V.Passed.000216.Trim)
+F.Intrinsic.Debug.SetLA("Carrier = ",V.Local.sCarrier)
+
+V.Local.bFedex.Set(False)
+F.Intrinsic.String.Instr(V.Local.sCarrier,"FDX",V.Local.iPos)
+F.Intrinsic.Control.If(V.Local.iPos,<>,0)
+	V.Local.bFedex.Set(True)
+F.Intrinsic.Control.ElseIf(V.Local.sCarrier,=,"FEDPR")
+	V.Local.bFedex.Set(True)
+F.Intrinsic.Control.ElseIf(V.Local.sCarrier,=,"FEDPRS")
+	V.Local.bFedex.Set(True)
+F.Intrinsic.Control.ElseIf(V.Local.sCarrier,=,"FEDSAV")
+	V.Local.bFedex.Set(True)
+F.Intrinsic.Control.ElseIf(V.Local.sCarrier,=,"FEDX")
+	V.Local.bFedex.Set(True)
+F.Intrinsic.Control.Else
+	f.Intrinsic.Control.If(V.Caller.PluginsDir.right1,=,"\")
+		F.Intrinsic.String.Concat(V.Caller.PluginsDir,"Gab\GAS\OE_Carrier_Checks_Fedex.txt",V.Local.sFile)
+	F.Intrinsic.Control.Else
+		F.Intrinsic.String.Concat(V.Caller.PluginsDir,"\Gab\GAS\OE_Carrier_Checks_Fedex.txt",V.Local.sFile)
+	F.Intrinsic.Control.EndIf
+	F.Intrinsic.File.Exists(V.Local.sFile,V.Local.bExists)
+
+	F.Intrinsic.Control.If(V.Local.bExists,=,True)
+		F.Intrinsic.file.File2String(V.Local.sFile,V.Local.sText)
+		F.Intrinsic.String.Split(V.Local.sText,V.Ambient.NewLine,V.Local.sText)
+		F.Intrinsic.Control.For(V.Local.iC,0,V.Local.sText.UBound,1)
+			F.Intrinsic.Control.If(V.Local.sText(v.Local.iC).Trim,<>,"")
+				F.Intrinsic.Control.If(V.Local.sCarrier.Trim,=,V.Local.sText(v.Local.iC).Trim)
+					V.Local.bFedex.Set(True)
+					F.Intrinsic.Control.ExitFor(V.Local.iC)
+				F.Intrinsic.Control.EndIf
+			F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.Next(V.Local.iC)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndIf
+
+f.Intrinsic.Control.If(V.Caller.PluginsDir.right1,=,"\")
+	F.Intrinsic.String.Concat(V.Caller.PluginsDir,"Gab\GAS\OE_Carrier_Checks_UPS.txt",V.Local.sFile)
+F.Intrinsic.Control.Else
+	F.Intrinsic.String.Concat(V.Caller.PluginsDir,"\Gab\GAS\OE_Carrier_Checks_UPS.txt",V.Local.sFile)
+F.Intrinsic.Control.EndIf
+F.Intrinsic.File.Exists(V.Local.sFile,V.Local.bExists)
+
+F.Intrinsic.Control.If(V.Local.bFedex,=,False)
+	F.Intrinsic.String.Instr(V.Local.sCarrier,"UPS",V.Local.iPos)
+	F.Intrinsic.Control.If(V.Local.iPos,=,0)
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.ElseIf(V.Local.bExists,=,True)
+		F.Intrinsic.file.File2String(V.Local.sFile,V.Local.sText)
+		F.Intrinsic.String.Split(V.Local.sText,V.Ambient.NewLine,V.Local.sText)
+		V.Local.bFound.Set(False)
+		F.Intrinsic.Control.For(V.Local.iC,0,V.Local.sText.UBound,1)
+			F.Intrinsic.Control.If(V.Local.sText(v.Local.iC).Trim,<>,"")
+				F.Intrinsic.Control.If(V.Local.sCarrier.Trim,=,V.Local.sText(v.Local.iC).Trim)
+					V.Local.bFound.Set(True)
+					F.Intrinsic.Control.ExitFor(V.Local.iC)
+				F.Intrinsic.Control.EndIf
+			F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.Next(V.Local.iC)
+
+		F.Intrinsic.Control.If(V.Local.bFound,=,False)
+			F.Intrinsic.Control.If(V.Local.sCarrier.Right1,<>,"C")
+				F.Intrinsic.Control.End
+			F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.ElseIf(V.Local.sCarrier.Right1,<>,"C")
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.If(V.Local.sAccount,=,"")
+	F.Intrinsic.UI.Msgbox("Collect # is required.  Order was not saved.","Carrier Verification Check")
+	V.Passed.777777.Set(1)
+	F.Intrinsic.File.String2File(V.Local.sOverideFile,"")
+	F.Intrinsic.Control.End
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.If(V.Local.bFedex,=,True)
+	F.Intrinsic.Control.If(V.Local.sAccount.Length,<>,9)
+		F.Intrinsic.UI.Msgbox("For Fedex, the Collect # must be 9 digits.  Order was not saved.","Carrier Verification Check")
+		V.Passed.777777.Set(1)
+		F.Intrinsic.File.String2File(V.Local.sOverideFile,"")
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Else
+	F.Intrinsic.Control.If(V.Local.sAccount.Length,<>,6)
+		F.Intrinsic.UI.Msgbox("For UPS, the Collect # must be 6 digits.  Order was not saved.","Carrier Verification Check")
+		V.Passed.777777.Set(1)
+		F.Intrinsic.File.String2File(V.Local.sOverideFile,"")
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndIf
+
+Program.Sub.Pre-Save.End
+
+Program.Sub.Post-Save.Start
+V.Local.sQuery.Declare(String)
+F.Intrinsic.String.LPad(V.Passed.000003,"0",7,V.Local.sQuery)
+F.Intrinsic.String.Concat("SELECT * FROM ORDER_HEADER WHERE RECORD_TYPE='A' AND ORDER_NO='",V.Local.sQuery,"'",V.Local.sQuery)
+F.ODBC.Connection!conx.OpenRecordsetRW("rst",V.Local.sQuery)
+F.Intrinsic.Control.If(V.ODBC.conx!rst.EOF,<>,True)
+	F.ODBC.conx!rst.Set!USER_1(V.Passed.000216)
+	F.ODBC.conx!rst.Update
+F.Intrinsic.Control.EndIf
+F.ODBC.conx!rst.Close
+
+'F.Intrinsic.Control.If(V.Caller.Hook,<>,"11890")
+'	V.Passed.GAB-TEXT-1.Set("")
+'F.Intrinsic.Control.EndIf
+
+Program.Sub.Post-Save.End
+
+Program.Sub.Change_Order.Start
+V.Local.sQuery.Declare(String)
+
+F.Intrinsic.String.LPad(V.Passed.000003,"0",7,V.Local.sQuery)
+F.Intrinsic.String.Concat("SELECT USER_1 FROM V_ORDER_HEADER WHERE ORDER_NO='",V.Local.sQuery,"'",V.Local.sQuery)
+F.ODBC.Connection!conx.OpenRecordsetRO("rst",V.Local.sQuery)
+F.Intrinsic.Control.If(V.ODBC.conx!rst.EOF,<>,True)
+	V.Passed.GAB-TEXT-1.Set(V.ODBC.conx!rst.FieldVal!USER_1)
+F.Intrinsic.Control.Else
+	V.Passed.GAB-TEXT-1.Set("")
+F.Intrinsic.Control.EndIf
+F.ODBC.conx!rst.Close
+
+Program.Sub.Change_Order.End
+
+Program.Sub.Comments.Start
+${$0$}$ATG_3786_OE_Carrier_Checks$}$JCT$}$4/12/2016
+${$1$}$$}$$}$3$}$11872$}$Post-Save Hook$}$4/12/2016 9:41:50 AM$}$(Program: ORD200; Screen: OES0200A)
+
+${$1$}$$}$$}$2$}$11870$}$Pre-Save Hook$}$4/12/2016 9:41:34 AM$}$(Program: ORD200; Screen: OES0200A)
+
+${$1$}$$}$$}$1$}$11565$}$OES0200A-ORDER-SELECTED-HOOK$}$4/12/2016 9:41:13 AM$}$(Program: ORD200; Screen: OES0200A)
+
+${$1$}$$}$$}$0$}$11870$}$Pre-Save Hook$}$4/12/2016 9:40:52 AM$}$(Program: ORD200; Screen: OES0200A)
+
+Program.Sub.Comments.End
+
